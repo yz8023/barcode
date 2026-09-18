@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>条码工厂 Pro HD</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+            background: #f5f5f7;
+            color: #1d1d1f;
+            font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        :root {
+            --primary: #007aff;
+            --card: #ffffff;
+            --border: #d2d2d7;
+            --error: #ff3b30;
+            --radius: 14px;
+        }
+
+        .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+
+        #historyDrawer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 80%;
+            max-width: 300px;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            z-index: 1001;
+            transform: translateX(-100%);
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 15px 0 30px rgba(0,0,0,0.05);
+        }
+        #historyDrawer.open { transform: translateX(0); }
+
+        .drawer-header { padding: 20px 15px; font-weight: 700; font-size: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+        .history-list { flex: 1; overflow-y: auto; padding: 12px; }
+        .history-item { 
+            background: var(--card); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; 
+            font-size: 13px; cursor: pointer; border: 1px solid transparent; transition: 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        .main-content {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        .app-header {
+            position: sticky;
+            top: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .container { 
+            width: 100%; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            padding: 16px; 
+            box-sizing: border-box; 
+        }
+
+        .card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
+        textarea { 
+            width: 100%; height: 110px; border: none; font-size: 16px; 
+            font-family: "SF Mono", Menlo, monospace; outline: none; background: transparent;
+            line-height: 1.4; resize: none;
+        }
+
+        .hint-text { font-size: 11px; color: #8e8e93; margin-top: 8px; display: block; }
+
+        details { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+        summary { font-size: 13px; color: var(--primary); cursor: pointer; outline: none; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 4px; }
+        
+        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+        .s-item { 
+            background: #f5f5f7; padding: 8px 12px; border-radius: 10px; 
+            font-size: 12px; display: flex; align-items: center; justify-content: space-between;
+        }
+
+        select, input[type="number"] {
+            border: none; background: transparent; color: var(--primary); font-weight: 700; 
+            font-size: 13px; outline: none; text-align: right; width: 60px;
+        }
+
+        .grid-preview { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); 
+            gap: 12px; 
+            width: 100%;
+        }
+        .barcode-box { 
+            background: white; border-radius: var(--radius); padding: 12px; 
+            border: 1px solid var(--border); text-align: center; position: relative;
+            cursor: pointer; transition: transform 0.1s;
+        }
+        .barcode-box:active { transform: scale(0.95); background: #f9f9f9; }
+        .barcode-box svg { max-width: 100%; height: auto; pointer-events: none; }
+        .index-tag { position: absolute; top: 6px; left: 8px; color: var(--error); font-size: 10px; font-weight: 800; }
+
+        #result-area { display: none; margin-top: 20px; text-align: center; width: 100%; }
+        #res-img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+        
+        .save-tip { 
+            background: var(--primary); color: white; padding: 8px 20px; border-radius: 30px; 
+            font-size: 12px; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px;
+        }
+
+        .bottom-dock {
+            position: sticky; bottom: 0; width: 100%;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            border-top: 1px solid var(--border);
+            display: flex; gap: 10px;
+            z-index: 100;
+        }
+        button { 
+            flex: 1; border: none; border-radius: 12px; padding: 12px; 
+            font-weight: 600; font-size: 14px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .btn-p { background: var(--primary); color: white; }
+        .btn-s { background: #e5e5ea; color: #1d1d1f; }
+
+        .mask { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 1000; display: none; }
+        .loading { position: fixed; inset: 0; background: rgba(255,255,255,0.9); z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        .spinner { width: 28px; height: 28px; border: 3px solid #eee; border-top: 3px solid var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 400px) {
+            .grid-preview { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="loading" id="loader">
+    <div class="spinner"></div>
+    <div style="font-weight:600; color:var(--primary)">高清渲染中...</div>
+</div>
+<div class="mask" id="mask" onclick="toggleHistory()"></div>
+
+<aside id="historyDrawer">
+    <div class="drawer-header">
+        <svg class="icon"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        存档记录
+    </div>
+    <div class="history-list" id="historyList"></div>
+    <div style="padding: 15px;">
+        <button class="btn-s" style="width: 100%;" onclick="saveCurrent()">
+            <svg class="icon" style="width:16px;height:16px;"><path d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+            存档当前
+        </button>
+    </div>
+</aside>
+
+<main class="main-content">
+    <header class="app-header">
+        <div onclick="toggleHistory()" style="display: flex; align-items: center; gap: 5px; color: var(--primary); cursor: pointer; font-weight: 600;">
+            <svg class="icon"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            历史
+        </div>
+        <div style="font-weight: 800; font-size: 16px;">Barcode Factory <span style="color:var(--primary)">HD</span></div>
+        <span id="badge" style="font-size: 11px; background: #8e8e93; color: white; padding: 2px 8px; border-radius: 20px;">0</span>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <textarea id="barcodeData" placeholder="在此输入数据，每行一个..."></textarea>
+            <span class="hint-text">💡 点击预览图可直接下载该条码图片</span>
+            
+            <details>
+                <summary>
+                    <svg class="icon" style="width:14px;height:14px;"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    渲染配置
+                </summary>
+                <div class="settings-grid">
+                    <div class="s-item">格式: 
+                        <select id="format" onchange="autoGen()">
+                            <option value="EAN13" selected>EAN-13</option>
+                            <option value="CODE128">CODE 128</option>
+                            <option value="CODE39">CODE 39</option>
+                            <option value="UPC">UPC-A</option>
+                            <option value="ITF14">ITF-14</option>
+                            <option value="pharmacode">Pharmacode</option>
+                            <option value="msi">MSI</option>
+                        </select>
+                    </div>
+                    <div class="s-item">拼图列数: <input type="number" id="cols" value="1" min="1"></div>
+                    <div class="s-item">显示序号: <input type="checkbox" id="showIdx" checked onchange="autoGen()"></div>
+                    <div class="s-item">条码颜色: <input type="color" id="bcColor" value="#000000" onchange="autoGen()"></div>
+                </div>
+            </details>
+        </div>
+
+        <div id="preview-grid" class="grid-preview"></div>
+
+        <div id="result-area">
+            <div class="save-tip">
+                <svg class="icon" style="width:14px;height:14px;"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                高清图已就绪，长按保存
+            </div>
+            <img id="res-img" src="">
+            <div style="height: 30px;"></div>
+        </div>
+    </div>
+
+    <div class="bottom-dock">
+        <button class="btn-s" onclick="downloadZip()">
+            <svg class="icon"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+            打包 ZIP
+        </button>
+        <button class="btn-p" onclick="makeHDImage()">
+            <svg class="icon"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            拼高清图
+        </button>
+    </div>
+</main>
+
+<script>
+    let timer = null;
+    const KEY = 'bc_factory_v5_final';
+
+    window.onload = () => {
+        const draft = localStorage.getItem('bc_draft_v5');
+        if (draft) { document.getElementById('barcodeData').value = draft; autoGen(); }
+        renderHistory();
+    };
+
+    document.getElementById('barcodeData').addEventListener('input', () => {
+        localStorage.setItem('bc_draft_v5', document.getElementById('barcodeData').value);
+        clearTimeout(timer);
+        timer = setTimeout(autoGen, 300);
+    });
+
+    // 1. 实时预览生成
+    function autoGen() {
+        const text = document.getElementById('barcodeData').value.trim();
+        const grid = document.getElementById('preview-grid');
+        const lines = text.split('\n').filter(l => l.trim());
+        const showIdx = document.getElementById('showIdx').checked;
+        const color = document.getElementById('bcColor').value;
+        const format = document.getElementById('format').value;
+        
+        grid.innerHTML = '';
+        document.getElementById('badge').textContent = lines.length;
+
+        lines.forEach((val, i) => {
+            const box = document.createElement('div');
+            box.className = 'barcode-box';
+            // 绑定点击下载事件
+            box.onclick = () => downloadSingle(val, i + 1);
+            
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            try {
+                JsBarcode(svg, val, { 
+                    format: format, lineColor: color, width: 2, height: 45, 
+                    displayValue: true, fontSize: 13, background: "transparent"
+                });
+                box.appendChild(svg);
+                if(showIdx) {
+                    const tag = document.createElement('div');
+                    tag.className = 'index-tag'; tag.textContent = `#${i+1}`;
+                    box.appendChild(tag);
+                }
+            } catch (e) { box.innerHTML = '<span style="color:var(--error);font-size:10px;font-weight:600;">格式错误</span>'; }
+            grid.appendChild(box);
+        });
+    }
+
+    // 下载单张图片功能
+    async function downloadSingle(val, index) {
+        const format = document.getElementById('format').value;
+        const color = document.getElementById('bcColor').value;
+        const showIdx = document.getElementById('showIdx').checked;
+        
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        try {
+            JsBarcode(svg, val, { 
+                format: format, lineColor: color, width: 2.5, height: 80, 
+                fontSize: 18, margin: 25, background: "#ffffff"
+            });
+            // 使用 scale=2 保持清晰
+            const cvs = await svgToCanvas(svg, 2, showIdx ? index : null);
+            const link = document.createElement('a');
+            link.href = cvs.toDataURL('image/png');
+            link.download = `barcode_${val}.png`;
+            link.click();
+        } catch (e) {
+            console.error("单个条码下载失败", e);
+        }
+    }
+
+    // 2. 高清拼图合成
+    async function makeHDImage() {
+        const text = document.getElementById('barcodeData').value.trim();
+        const lines = text.split('\n').filter(l => l.trim());
+        if (!lines.length) return;
+
+        document.getElementById('loader').style.display = 'flex';
+        const cols = Math.max(1, parseInt(document.getElementById('cols').value) || 1);
+        const showIdx = document.getElementById('showIdx').checked;
+        const color = document.getElementById('bcColor').value;
+        const format = document.getElementById('format').value;
+        const scale = 3;
+
+        const canvases = [];
+        for (let i = 0; i < lines.length; i++) {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            try {
+                JsBarcode(svg, lines[i], { 
+                    format: format, lineColor: color, width: 2.5, height: 85, 
+                    fontSize: 18, margin: 25, background: "#ffffff"
+                });
+                const cvs = await svgToCanvas(svg, scale, showIdx ? i+1 : null);
+                canvases.push(cvs);
+            } catch (e) {}
+        }
+
+        if(!canvases.length) { document.getElementById('loader').style.display = 'none'; return; }
+
+        const w = canvases[0].width, h = canvases[0].height;
+        const rows = Math.ceil(canvases.length / cols);
+        const finalCvs = document.createElement('canvas');
+        finalCvs.width = cols * w; finalCvs.height = rows * h;
+        const ctx = finalCvs.getContext('2d');
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,finalCvs.width,finalCvs.height);
+
+        canvases.forEach((c, i) => {
+            ctx.drawImage(c, (i%cols)*w, Math.floor(i/cols)*h);
+        });
+
+        document.getElementById('res-img').src = finalCvs.toDataURL('image/png');
+        document.getElementById('result-area').style.display = 'block';
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('res-img').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function svgToCanvas(svg, scale, index) {
+        return new Promise(resolve => {
+            const xml = new XMLSerializer().serializeToString(svg);
+            const img = new Image();
+            img.onload = () => {
+                const c = document.createElement('canvas');
+                c.width = img.width * scale; c.height = img.height * scale;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,c.width,c.height);
+                ctx.drawImage(img, 0, 0, c.width, c.height);
+                if (index) {
+                    ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(8,8,75,42);
+                    ctx.fillStyle = "#ff3b30"; ctx.font = "bold 34px -apple-system";
+                    ctx.fillText("#"+index, 15, 42);
+                }
+                resolve(c);
+            };
+            img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+        });
+    }
+
+    // 历史管理
+    function saveCurrent() {
+        const text = document.getElementById('barcodeData').value.trim();
+        if (!text) return;
+        let h = JSON.parse(localStorage.getItem(KEY) || '[]');
+        h.unshift({ id: Date.now(), data: text, count: text.split('\n').length, format: document.getElementById('format').value });
+        localStorage.setItem(KEY, JSON.stringify(h.slice(0, 30)));
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const h = JSON.parse(localStorage.getItem(KEY) || '[]');
+        const list = document.getElementById('historyList');
+        list.innerHTML = h.map(item => `
+            <div class="history-item" onclick="loadHist('${item.id}')">
+                <div style="font-weight:700;margin-bottom:4px;color:var(--primary)">${new Date(item.id).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                <div style="color:#666">${item.count} 条 | ${item.format}</div>
+            </div>
+        `).join('');
+    }
+
+    window.loadHist = (id) => {
+        const h = JSON.parse(localStorage.getItem(KEY) || '[]');
+        const item = h.find(x => x.id == id);
+        if (item) { 
+            document.getElementById('barcodeData').value = item.data; 
+            document.getElementById('format').value = item.format;
+            autoGen(); 
+            toggleHistory(); 
+        }
+    };
+
+    function toggleHistory() {
+        const d = document.getElementById('historyDrawer');
+        const m = document.getElementById('mask');
+        const isOpen = d.classList.contains('open');
+        d.classList.toggle('open');
+        m.style.display = isOpen ? 'none' : 'block';
+    }
+
+    async function downloadZip() {
+        const text = document.getElementById('barcodeData').value.trim();
+        const lines = text.split('\n').filter(l => l.trim());
+        if (!lines.length) return;
+        const zip = new JSZip();
+        for (let i = 0; i < lines.length; i++) {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            try {
+                JsBarcode(svg, lines[i], { format: document.getElementById('format').value, lineColor: document.getElementById('bcColor').value, width: 2, height: 80 });
+                const cvs = await svgToCanvas(svg, 2, document.getElementById('showIdx').checked ? i+1 : null);
+                zip.file(`bc_${i+1}.png`, cvs.toDataURL().split(',')[1], {base64: true});
+            } catch (e) {}
+        }
+        const blob = await zip.generateAsync({type: "blob"});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `Batch_Barcodes.zip`;
+        link.click();
+    }
+</script>
+</body>
+</html>

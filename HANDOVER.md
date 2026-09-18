@@ -1,8 +1,8 @@
 # HANDOVER.md — 条码工厂 Pro HD (Barcode Factory HD)
 
 > 仓库：`https://github.com/yz8023/barcode`（分支 `main`）
-> 最近 commit：`a2a19bcd259ab61d8912bf9f212f68b00d039586`（"Upload from Android"，即原 HTML 版）
-> 本次交接内容为本机未提交的**安卓重构改动**，已在本环境实际构建验证通过。
+> 原始 HTML 版 commit：`a2a19bcd259ab61d8912bf9f212f68b00d039586`（"Upload from Android"）
+> 本轮安卓重构交接 commit：`c6b0053`（已推送至 `origin/main`），已在本环境实际构建验证通过。
 > 备用 Gradle 发行版镜像（无法直连时）：`https://mirrors.cloud.tencent.com/gradle/`
 
 ---
@@ -14,7 +14,7 @@
 - **SDK 版本**：`minSdk 24`（Android 7.0）/ `targetSdk 34` / `compileSdk 34`。
 - **包名**：`com.barcode.factory`
 - **应用名**：条码工厂 Pro HD（versionName `1.0` / versionCode `1`）
-- **commit 哈希**：`a2a19bcd259ab61d8912bf9f212f68b00d039586`（远程仓库已有历史）；本次重构改动尚未提交。
+- **commit 哈希**：原始 HTML 版 `a2a19bcd259ab61d8912bf9f212f68b00d039586`；本轮安卓重构 `c6b0053`（已推送至 `origin/main`）。
 
 ## 2. 开发环境
 
@@ -94,7 +94,7 @@ echo "sdk.dir=/opt/android-sdk" > local.properties
 - **已完成**：HTML → 原生安卓重构；扫码自动记录；单独/一键复制；格式记忆；高清拼图存相册；ZIP 打包；存档记录（30 条）；图标生成。
 - **进行中**：无。
 - **已搁置**：无。
-- **最近可运行的 commit**：`a2a19bc`（原 HTML 版）；本次安卓重构为本机未提交改动，已构建验证（`BUILD SUCCESSFUL`）。
+- **最近可运行的 commit**：`c6b0053`（安卓重构，已推送，构建验证 `BUILD SUCCESSFUL`）；历史 HTML 版 `a2a19bc`。
 
 ## 7. 待开发内容
 

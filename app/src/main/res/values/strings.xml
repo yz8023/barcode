@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">条码工厂 Pro HD</string>
+
+    <string name="history">历史</string>
+    <string name="archive_records">存档记录</string>
+    <string name="archive_current">存档当前</string>
+    <string name="input_hint">在此输入数据，每行一个，或点击扫码自动记录…</string>
+    <string name="input_tip">点击下方预览条码可复制；扫码可自动追加记录</string>
+    <string name="render_config">渲染配置</string>
+    <string name="format_label">格式</string>
+    <string name="columns_label">拼图列数</string>
+    <string name="show_index_label">显示序号</string>
+    <string name="color_label">条码颜色</string>
+    <string name="scan">扫码</string>
+    <string name="copy_all">一键复制</string>
+    <string name="pack_zip">打包 ZIP</string>
+    <string name="make_hd">拼高清图</string>
+    <string name="hd_ready">高清图已保存到相册</string>
+    <string name="copied_single">已复制：%1$s</string>
+    <string name="copied_all">已复制 %1$d 条条码</string>
+    <string name="copy_empty">没有可复制的内容</string>
+    <string name="scan_prompt">对准条码进行扫描</string>
+    <string name="scanned_added">已记录扫码结果：%1$s</string>
+    <string name="format_error">格式错误</string>
+    <string name="generating">高清渲染中…</string>
+    <string name="saved_archive">已存档</string>
+    <string name="zip_saved">ZIP 已保存：%1$s</string>
+    <string name="save_failed">保存失败：%1$s</string>
+    <string name="empty_archive">暂无存档记录</string>
+    <string name="count_badge">%1$d</string>
+    <string name="delete">删除</string>
+    <string name="copy">复制</string>
+</resources>

@@ -33,7 +33,6 @@
     <string name="copy">复制</string>
 
     <string name="scan_area_config">扫码识别区域</string>
-    <string name="scan_area_summary">竖屏：%1$s ｜ 横屏：%2$s</string>
     <string name="scan_area_title">识别区域（多码场景防误读）</string>
     <string name="scan_area_portrait">竖屏</string>
     <string name="scan_area_landscape">横屏</string>

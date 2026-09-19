@@ -11,8 +11,20 @@ android {
         applicationId = "com.barcode.factory"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("../keystore/release.jks")
+            storePassword = "barcode2026"
+            keyAlias = "barcode"
+            keyPassword = "barcode2026"
+        }
     }
 
     buildFeatures {
@@ -21,7 +33,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

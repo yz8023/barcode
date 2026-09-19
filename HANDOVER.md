@@ -10,11 +10,11 @@
 ## 1. 项目概述
 
 - **一句话定位**：条码批量生成 + 扫码自动记录 + 复制/导出工具，用户把每行一个的数据转成 EAN/CODE/UPC 等 7 种条码，扫码后自动追加记录，可单独或一键复制。
-- **技术栈**：Kotlin、ViewBinding、Material Components、ZXing core 3.5.3、zxing-android-embedded 4.3.0（扫码）、Gradle 8.4、AGP 8.3.2、Kotlin 1.9.22。
+- **技术栈**：Kotlin、ViewBinding、Material Components、ZXing core 3.5.3（生成）、CameraX 1.3.1 + ML Kit barcode-scanning 17.2.0（扫码）、Gradle 8.4、AGP 8.3.2、Kotlin 1.9.22。
 - **SDK 版本**：`minSdk 24`（Android 7.0）/ `targetSdk 34` / `compileSdk 34`。
 - **包名**：`com.barcode.factory`
-- **应用名**：条码工厂 Pro HD（versionName `1.0` / versionCode `1`）
-- **commit 哈希**：原始 HTML 版 `a2a19bcd259ab61d8912bf9f212f68b00d039586`；本轮安卓重构 `c6b0053`（已推送至 `origin/main`）。
+- **应用名**：条码工厂 Pro HD（versionName `1.3` / versionCode `4`）
+- **commit 哈希**：原始 HTML 版 `a2a19bcd259ab61d8912bf9f212f68b00d039586`；v1.3 正式版 `d3b9202`（已推送至 `origin/main`）。
 
 ## 2. 开发环境
 
@@ -47,6 +47,18 @@ echo "sdk.dir=/opt/android-sdk" > local.properties
 # 4. 产物
 # app/build/outputs/apk/debug/app-debug.apk
 ```
+
+正式版（release）构建：
+
+```bash
+# 需要 keystore/release.jks（已配置 signingConfig，密码 barcode2026）
+./gradlew :app:assembleRelease
+
+# 产物
+# app/build/outputs/apk/release/app-release.apk
+```
+
+- **release 优化**：`isMinifyEnabled`（R8）+ `isShrinkResources` 裁剪；`ndk.abiFilters` 仅保留 `arm64-v8a` / `armeabi-v7a`（剔除 x86 模拟器库，APK 从 27MB 降到 11MB）。
 
 - **已知坑与解法**
   - `SDK location not found` → 补 `local.properties` 的 `sdk.dir` 或导出 `ANDROID_SDK_ROOT`。

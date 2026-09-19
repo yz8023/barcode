@@ -16,7 +16,6 @@ import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.AdapterView
@@ -24,9 +23,6 @@ import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -41,7 +37,6 @@ import com.barcode.factory.codec.BarcodeGenerator
 import com.barcode.factory.data.AppPrefs
 import com.barcode.factory.data.Archive
 import com.barcode.factory.data.ColorOption
-import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityMainBinding
 import com.barcode.factory.util.FileExporter
 import com.google.android.material.chip.Chip
@@ -170,8 +165,6 @@ class MainActivity : AppCompatActivity() {
             prefs.showIndex = checked
             scheduleGenerate(0)
         }
-
-        refreshScanAreaSummary()
     }
 
     private fun setupFormatChips() {
@@ -216,79 +209,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshScanAreaSummary() {
-        binding.tvScanAreaSummary.text = getString(
-            R.string.scan_area_summary,
-            prefs.scanAreaPortrait.label,
-            prefs.scanAreaLandscape.label
-        )
-    }
-
-    private fun showScanAreaDialog() {
-        val portrait = prefs.scanAreaPortrait
-        val landscape = prefs.scanAreaLandscape
-
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-        }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(8), dp(24), dp(4))
-        }
-
-        fun addGroup(
-            title: String,
-            current: ScanAreaOption,
-            onSelected: (ScanAreaOption) -> Unit
-        ): RadioGroup {
-            val label = TextView(this@MainActivity).apply {
-                text = title
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                setPadding(0, dp(12), 0, dp(8))
-            }
-            container.addView(label)
-            val group = RadioGroup(this@MainActivity).apply {
-                orientation = RadioGroup.VERTICAL
-            }
-            ScanAreaOption.entries.forEach { option ->
-                val radio = RadioButton(this@MainActivity).apply {
-                    text = option.label
-                    isChecked = option == current
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-                    setOnCheckedChangeListener { buttonView, isChecked ->
-                        if (isChecked && buttonView.tag == option) onSelected(option)
-                    }
-                    tag = option
-                }
-                group.addView(radio, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(2) })
-            }
-            container.addView(group)
-            return group
-        }
-
-        addGroup(getString(R.string.scan_area_portrait), portrait) {
-            prefs.scanAreaPortrait = it
-        }
-        addGroup(getString(R.string.scan_area_landscape), landscape) {
-            prefs.scanAreaLandscape = it
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.scan_area_title)
-            .setMessage(R.string.scan_area_hint)
-            .setView(scroll.also { it.addView(container) })
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton("完成") { _, _ -> refreshScanAreaSummary() }
-            .show()
-    }
-
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
-
     private fun setupInput() {
         binding.inputData.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -306,7 +226,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnCopyAll.setOnClickListener { copyAll() }
         binding.btnMakeHd.setOnClickListener { withStoragePermission { makeHdImage() } }
         binding.btnZip.setOnClickListener { withStoragePermission { exportZip() } }
-        binding.btnScanArea.setOnClickListener { showScanAreaDialog() }
     }
 
     private fun setupDrawer() {

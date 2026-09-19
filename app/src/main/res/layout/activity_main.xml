@@ -205,76 +205,44 @@
                             android:textSize="13sp"
                             android:textStyle="bold" />
 
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="@string/format_label"
+                            android:textColor="@color/text_primary"
+                            android:textSize="12sp" />
+
+                        <com.google.android.material.chip.ChipGroup
+                            android:id="@+id/chipGroupFormat"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            app:selectionRequired="true"
+                            app:singleLine="false"
+                            app:singleSelection="true" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="@string/columns_label"
+                            android:textColor="@color/text_primary"
+                            android:textSize="12sp" />
+
+                        <com.google.android.material.chip.ChipGroup
+                            android:id="@+id/chipGroupColumns"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            app:selectionRequired="true"
+                            app:singleLine="false"
+                            app:singleSelection="true" />
+
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="12dp"
-                            android:orientation="horizontal">
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:background="@drawable/bg_input"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal"
-                                android:paddingHorizontal="12dp"
-                                android:paddingVertical="6dp">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/format_label"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="12sp" />
-
-                                <Spinner
-                                    android:id="@+id/spinnerFormat"
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:spinnerMode="dropdown" />
-                            </LinearLayout>
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:layout_weight="1"
-                                android:background="@drawable/bg_input"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal"
-                                android:paddingHorizontal="12dp"
-                                android:paddingVertical="6dp">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/columns_label"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="12sp" />
-
-                                <EditText
-                                    android:id="@+id/inputCols"
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:background="@null"
-                                    android:gravity="end"
-                                    android:inputType="number"
-                                    android:maxLength="2"
-                                    android:minWidth="36dp"
-                                    android:text="1"
-                                    android:textColor="@color/primary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold" />
-                            </LinearLayout>
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
                             android:orientation="horizontal">
 
                             <LinearLayout
@@ -386,13 +354,12 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <!-- Preview grid -->
-                <androidx.recyclerview.widget.RecyclerView
+                <LinearLayout
                     android:id="@+id/previewGrid"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:nestedScrollingEnabled="false"
-                    android:overScrollMode="never" />
+                    android:orientation="vertical" />
 
                 <TextView
                     android:id="@+id/tvEmpty"

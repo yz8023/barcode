@@ -6,7 +6,7 @@
     <string name="archive_records">存档记录</string>
     <string name="archive_current">存档当前</string>
     <string name="input_hint">在此输入数据，每行一个，或点击扫码自动记录…</string>
-    <string name="input_tip">点击下方预览条码可复制；扫码可自动追加记录</string>
+    <string name="input_tip">点击预览条码可复制，长按保存单张；扫码自动追加记录并匹配格式</string>
     <string name="render_config">渲染配置</string>
     <string name="format_label">格式</string>
     <string name="columns_label">拼图列数</string>
@@ -46,4 +46,5 @@
     <string name="scanning">正在识别…</string>
     <string name="permission_camera_denied">未授予相机权限，无法扫码</string>
     <string name="camera_bind_failed">相机启动失败：%1$s</string>
+    <string name="saved_single">已保存单张：%1$s</string>
 </resources>

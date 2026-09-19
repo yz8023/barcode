@@ -1,6 +1,7 @@
 package com.barcode.factory.ui
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -12,7 +13,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Size
+import android.util.TypedValue
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -24,6 +31,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import com.barcode.factory.R
 import com.barcode.factory.data.AppPrefs
+import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityScanBinding
 import com.barcode.factory.util.TorchController
 import com.google.mlkit.vision.barcode.BarcodeScanner
@@ -46,6 +54,7 @@ class ScanActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_RESULT = "scan_result"
+        const val EXTRA_RESULT_FORMAT = "scan_result_format"
         private const val TARGET_WIDTH = 960
         private const val TARGET_HEIGHT = 540
         private const val ML_KIT_MAX_WIDTH = 720
@@ -65,7 +74,9 @@ class ScanActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityScanBinding
+    private lateinit var prefs: AppPrefs
     private var areaFraction: Float = 0.5f
+    private var isLandscape: Boolean = false
 
     private val scanning = AtomicBoolean(false)
     private var scanner: BarcodeScanner? = null
@@ -84,18 +95,18 @@ class ScanActivity : AppCompatActivity() {
         setContentView(binding.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val prefs = AppPrefs(this)
-        val landscape =
+        prefs = AppPrefs(this)
+        isLandscape =
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        areaFraction = if (landscape) prefs.scanAreaLandscape.heightFraction
-        else prefs.scanAreaPortrait.heightFraction
-        binding.overlayView.heightFraction = areaFraction
+        applyScanArea()
+
         binding.tvScanHint.setText(
-            if (landscape) R.string.scan_hint_landscape else R.string.scan_hint_portrait
+            if (isLandscape) R.string.scan_hint_landscape else R.string.scan_hint_portrait
         )
 
         binding.btnCloseScan.setOnClickListener { finish() }
         binding.btnTorch.setOnClickListener { toggleTorch() }
+        binding.btnAreaConfig.setOnClickListener { showAreaConfigDialog() }
 
         scanner = BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -174,7 +185,8 @@ class ScanActivity : AppCompatActivity() {
         scanner?.process(inputImage)
             ?.addOnSuccessListener { barcodes ->
                 val raw = barcodes.firstOrNull()?.rawValue
-                if (!raw.isNullOrBlank()) finishWithResult(raw)
+                val format = barcodes.firstOrNull()?.format ?: -1
+                if (!raw.isNullOrBlank()) finishWithResult(raw, format)
             }
             ?.addOnCompleteListener {
                 scanning.set(false)
@@ -205,6 +217,74 @@ class ScanActivity : AppCompatActivity() {
         return Bitmap.createScaledBitmap(src, ML_KIT_MAX_WIDTH, (src.height * ratio).toInt(), true)
     }
 
+    private fun applyScanArea() {
+        areaFraction = if (isLandscape) prefs.scanAreaLandscape.heightFraction
+        else prefs.scanAreaPortrait.heightFraction
+        binding.overlayView.heightFraction = areaFraction
+    }
+
+    private fun showAreaConfigDialog() {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+        }
+
+        fun addGroup(
+            title: String,
+            current: ScanAreaOption,
+            onSelected: (ScanAreaOption) -> Unit
+        ) {
+            container.addView(TextView(this).apply {
+                text = title
+                setTextColor(ContextCompat.getColor(this@ScanActivity, R.color.text_primary))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(0, dp(12), 0, dp(8))
+            })
+            val group = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+            ScanAreaOption.entries.forEach { option ->
+                val radio = RadioButton(this).apply {
+                    text = option.label
+                    isChecked = option == current
+                    setTextColor(ContextCompat.getColor(this@ScanActivity, R.color.text_primary))
+                    setOnCheckedChangeListener { buttonView, checked ->
+                        if (checked && buttonView.tag == option) onSelected(option)
+                    }
+                    tag = option
+                }
+                group.addView(radio, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(2) })
+            }
+            container.addView(group)
+        }
+
+        addGroup(
+            getString(R.string.scan_area_portrait),
+            prefs.scanAreaPortrait
+        ) {
+            prefs.scanAreaPortrait = it
+            isLandscape = false
+            applyScanArea()
+        }
+        addGroup(
+            getString(R.string.scan_area_landscape),
+            prefs.scanAreaLandscape
+        ) {
+            prefs.scanAreaLandscape = it
+            isLandscape = true
+            applyScanArea()
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.scan_area_title)
+            .setMessage(R.string.scan_area_hint)
+            .setView(scroll.also { it.addView(container) })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun toggleTorch() {
         val handler = torchHandler ?: return
         torchOn = !torchOn
@@ -219,13 +299,21 @@ class ScanActivity : AppCompatActivity() {
 
     private var torchOn = false
 
-    private fun finishWithResult(raw: String) {
+    private fun finishWithResult(raw: String, format: Int) {
         playBeep()
         runOnUiThread {
-            setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT, raw))
+            setResult(
+                RESULT_OK,
+                Intent()
+                    .putExtra(EXTRA_RESULT, raw)
+                    .putExtra(EXTRA_RESULT_FORMAT, format)
+            )
             finish()
         }
     }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     private fun playBeep() {
         runCatching {

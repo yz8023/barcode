@@ -34,7 +34,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.GravityCompat
-import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.barcode.factory.R
 import com.barcode.factory.codec.BarcodeFormatSpec
@@ -45,6 +44,9 @@ import com.barcode.factory.data.ColorOption
 import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityMainBinding
 import com.barcode.factory.util.FileExporter
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import com.google.mlkit.vision.barcode.common.Barcode
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.zip.ZipEntry
@@ -77,7 +79,9 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val contents = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)
-            if (!contents.isNullOrBlank()) appendScanned(contents)
+            if (contents.isNullOrBlank()) return@registerForActivityResult
+            val format = result.data?.getIntExtra(ScanActivity.EXTRA_RESULT_FORMAT, -1) ?: -1
+            appendScanned(contents, format)
         }
     }
 
@@ -123,10 +127,10 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- setup
 
     private fun setupPreview() {
-        adapter = BarcodeAdapter { value -> copySingle(value) }
-        binding.previewGrid.layoutManager = GridLayoutManager(this, 2)
-        binding.previewGrid.adapter = adapter
-        binding.previewGrid.isNestedScrollingEnabled = false
+        adapter = BarcodeAdapter(
+            onCopy = { value -> copySingle(value) },
+            onSaveSingle = { index -> saveSingleBitmap(index) }
+        )
     }
 
     private fun setupArchives() {
@@ -142,19 +146,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSettings() {
-        val formatLabels = BarcodeFormatSpec.values().map { it.label }
-        binding.spinnerFormat.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, formatLabels
-        )
-        binding.spinnerFormat.setSelection(BarcodeFormatSpec.fromKey(prefs.lastFormat).ordinal)
-        binding.spinnerFormat.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                prefs.lastFormat = currentFormat.key
-                scheduleGenerate(0)
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
+        setupFormatChips()
+        setupColumnChips()
 
         val colorLabels = colorOptions.map { it.name }
         binding.spinnerColor.adapter = ArrayAdapter(
@@ -178,16 +171,49 @@ class MainActivity : AppCompatActivity() {
             scheduleGenerate(0)
         }
 
-        binding.inputCols.setText(prefs.columns.toString())
-        binding.inputCols.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            override fun afterTextChanged(s: Editable?) {
-                prefs.columns = currentColumns
-            }
-        })
-
         refreshScanAreaSummary()
+    }
+
+    private fun setupFormatChips() {
+        val formats = BarcodeFormatSpec.values()
+        val selected = BarcodeFormatSpec.fromKey(prefs.lastFormat)
+        formats.forEach { format ->
+            val chip = Chip(this).apply {
+                text = format.label
+                isCheckable = true
+                isChecked = format == selected
+                tag = format
+            }
+            binding.chipGroupFormat.addView(chip)
+        }
+        binding.chipGroupFormat.setOnCheckedStateChangeListener { group, checkedIds ->
+            val chip = checkedIds.firstOrNull()
+                ?.let { group.findViewById<Chip>(it) }
+            val format = chip?.tag as? BarcodeFormatSpec ?: return@setOnCheckedStateChangeListener
+            prefs.lastFormat = format.key
+            scheduleGenerate(0)
+        }
+    }
+
+    private fun setupColumnChips() {
+        val options = listOf(1, 2, 3, 4, 6)
+        val selected = options.indexOf(prefs.columns).takeIf { it >= 0 } ?: 0
+        options.forEachIndexed { index, columns ->
+            val chip = Chip(this).apply {
+                text = columns.toString()
+                isCheckable = true
+                isChecked = index == selected
+                tag = columns
+            }
+            binding.chipGroupColumns.addView(chip)
+        }
+        binding.chipGroupColumns.setOnCheckedStateChangeListener { group, checkedIds ->
+            val chip = checkedIds.firstOrNull()
+                ?.let { group.findViewById<Chip>(it) }
+            val columns = chip?.tag as? Int ?: return@setOnCheckedStateChangeListener
+            prefs.columns = columns
+            scheduleGenerate(0)
+        }
     }
 
     private fun refreshScanAreaSummary() {
@@ -316,9 +342,25 @@ class MainActivity : AppCompatActivity() {
             ?: emptyList()
 
     private val currentFormat: BarcodeFormatSpec
-        get() = BarcodeFormatSpec.values().getOrElse(binding.spinnerFormat.selectedItemPosition) {
-            BarcodeFormatSpec.EAN13
+        get() {
+            val id = binding.chipGroupFormat.checkedChipId
+            return if (id == View.NO_ID) {
+                BarcodeFormatSpec.fromKey(prefs.lastFormat)
+            } else {
+                binding.chipGroupFormat.findViewById<Chip>(id)?.tag as? BarcodeFormatSpec
+                    ?: BarcodeFormatSpec.fromKey(prefs.lastFormat)
+            }
         }
+
+    private fun selectFormat(format: BarcodeFormatSpec) {
+        for (i in 0 until binding.chipGroupFormat.childCount) {
+            val chip = binding.chipGroupFormat.getChildAt(i) as? Chip ?: continue
+            if (chip.tag == format) {
+                chip.isChecked = true
+                break
+            }
+        }
+    }
 
     private val currentColor: Int
         get() = Color.parseColor(
@@ -326,7 +368,14 @@ class MainActivity : AppCompatActivity() {
         )
 
     private val currentColumns: Int
-        get() = binding.inputCols.text.toString().toIntOrNull()?.coerceAtLeast(1) ?: 1
+        get() {
+            val id = binding.chipGroupColumns.checkedChipId
+            return if (id == View.NO_ID) {
+                prefs.columns
+            } else {
+                binding.chipGroupColumns.findViewById<Chip>(id)?.tag as? Int ?: prefs.columns
+            }
+        }
 
     // ---------------------------------------------------------- rendering
 
@@ -360,6 +409,7 @@ class MainActivity : AppCompatActivity() {
             handler.post {
                 if (token != generateToken) return@post
                 adapter.submit(values, bitmaps)
+                adapter.renderInto(binding.previewGrid)
                 binding.badge.text = values.size.toString()
                 updateEmptyState()
             }
@@ -388,12 +438,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendScanned(value: String) {
+    private fun appendScanned(value: String, mlKitFormat: Int = -1) {
         val current = binding.inputData.text?.toString().orEmpty()
         val merged = if (current.isBlank()) value else current.trimEnd('\n') + "\n" + value
         binding.inputData.setText(merged)
         binding.inputData.setSelection(merged.length)
+
+        matchFormatForScan(mlKitFormat)?.let { format ->
+            prefs.lastFormat = format.key
+            selectFormat(format)
+            scheduleGenerate(0)
+        }
         toast(getString(R.string.scanned_added, value))
+    }
+
+    private fun matchFormatForScan(mlKitFormat: Int): BarcodeFormatSpec? = when (mlKitFormat) {
+        Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8 -> BarcodeFormatSpec.EAN13
+        Barcode.FORMAT_CODE_128 -> BarcodeFormatSpec.CODE128
+        Barcode.FORMAT_CODE_39 -> BarcodeFormatSpec.CODE39
+        Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E -> BarcodeFormatSpec.UPC
+        Barcode.FORMAT_ITF -> BarcodeFormatSpec.ITF14
+        else -> null
     }
 
     private fun showManualAddDialog() {
@@ -448,6 +513,41 @@ class MainActivity : AppCompatActivity() {
         } else {
             pendingStorageAction = action
             storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
+    private fun saveSingleBitmap(index: Int) {
+        val values = currentValues()
+        val value = values.getOrNull(index) ?: return
+        withStoragePermission {
+            showLoading(true)
+            executor.execute {
+                val bitmap = BarcodeGenerator.render(
+                    value, currentFormat,
+                    BarcodeGenerator.RenderOptions(
+                        moduleWidth = 3,
+                        barHeight = 110,
+                        color = currentColor,
+                        showText = true,
+                        textSizePx = 32f,
+                        indexLabel = if (binding.switchIndex.isChecked) index + 1 else null,
+                        paddingModules = 10
+                    )
+                )
+                val saved = bitmap?.let {
+                    FileExporter.saveBitmapToGallery(
+                        this, it, "barcode_${System.currentTimeMillis()}.png"
+                    )
+                }
+                handler.post {
+                    showLoading(false)
+                    if (saved != null) {
+                        toast(getString(R.string.saved_single, value))
+                    } else {
+                        toast(getString(R.string.save_failed, "未知错误"))
+                    }
+                }
+            }
         }
     }
 
@@ -600,7 +700,7 @@ class MainActivity : AppCompatActivity() {
         binding.inputData.setText(archive.values.joinToString("\n"))
         binding.inputData.setSelection(binding.inputData.text?.length ?: 0)
         val spec = BarcodeFormatSpec.fromKey(archive.format)
-        binding.spinnerFormat.setSelection(spec.ordinal)
+        selectFormat(spec)
         prefs.lastFormat = spec.key
         binding.drawerLayout.closeDrawer(GravityCompat.START)
         scheduleGenerate(0)

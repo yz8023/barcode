@@ -34,6 +34,14 @@ class AppPrefs(context: Context) {
         get() = jsonToStringList(prefs.getString(KEY_DRAFT, null))
         set(value) = prefs.edit().putString(KEY_DRAFT, stringListToJson(value).toString()).apply()
 
+    var scanAreaPortrait: ScanAreaOption
+        get() = ScanAreaOption.fromKey(prefs.getString(KEY_SCAN_AREA_PORTRAIT, null))
+        set(value) = prefs.edit().putString(KEY_SCAN_AREA_PORTRAIT, value.key).apply()
+
+    var scanAreaLandscape: ScanAreaOption
+        get() = ScanAreaOption.fromKey(prefs.getString(KEY_SCAN_AREA_LANDSCAPE, null))
+        set(value) = prefs.edit().putString(KEY_SCAN_AREA_LANDSCAPE, value.key).apply()
+
     fun loadArchives(): MutableList<Archive> {
         val raw = prefs.getString(KEY_ARCHIVES, null) ?: return mutableListOf()
         return try {
@@ -95,5 +103,7 @@ class AppPrefs(context: Context) {
         private const val KEY_SHOW_INDEX = "show_index"
         private const val KEY_DRAFT = "draft"
         private const val KEY_ARCHIVES = "archives"
+        private const val KEY_SCAN_AREA_PORTRAIT = "scan_area_portrait"
+        private const val KEY_SCAN_AREA_LANDSCAPE = "scan_area_landscape"
     }
 }

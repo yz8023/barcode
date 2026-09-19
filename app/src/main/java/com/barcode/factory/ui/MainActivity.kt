@@ -1,6 +1,7 @@
 package com.barcode.factory.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -15,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.AdapterView
@@ -22,6 +24,9 @@ import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -37,10 +42,9 @@ import com.barcode.factory.codec.BarcodeGenerator
 import com.barcode.factory.data.AppPrefs
 import com.barcode.factory.data.Archive
 import com.barcode.factory.data.ColorOption
+import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityMainBinding
 import com.barcode.factory.util.FileExporter
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.zip.ZipEntry
@@ -68,9 +72,13 @@ class MainActivity : AppCompatActivity() {
         ColorOption("紫色", "#AF52DE")
     )
 
-    private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
-        val contents = result.contents
-        if (!contents.isNullOrBlank()) appendScanned(contents)
+    private val scanLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val contents = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)
+            if (!contents.isNullOrBlank()) appendScanned(contents)
+        }
     }
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -178,7 +186,82 @@ class MainActivity : AppCompatActivity() {
                 prefs.columns = currentColumns
             }
         })
+
+        refreshScanAreaSummary()
     }
+
+    private fun refreshScanAreaSummary() {
+        binding.tvScanAreaSummary.text = getString(
+            R.string.scan_area_summary,
+            prefs.scanAreaPortrait.label,
+            prefs.scanAreaLandscape.label
+        )
+    }
+
+    private fun showScanAreaDialog() {
+        val portrait = prefs.scanAreaPortrait
+        val landscape = prefs.scanAreaLandscape
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+        }
+
+        fun addGroup(
+            title: String,
+            current: ScanAreaOption,
+            onSelected: (ScanAreaOption) -> Unit
+        ): RadioGroup {
+            val label = TextView(this@MainActivity).apply {
+                text = title
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(0, dp(12), 0, dp(8))
+            }
+            container.addView(label)
+            val group = RadioGroup(this@MainActivity).apply {
+                orientation = RadioGroup.VERTICAL
+            }
+            ScanAreaOption.entries.forEach { option ->
+                val radio = RadioButton(this@MainActivity).apply {
+                    text = option.label
+                    isChecked = option == current
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                    setOnCheckedChangeListener { buttonView, isChecked ->
+                        if (isChecked && buttonView.tag == option) onSelected(option)
+                    }
+                    tag = option
+                }
+                group.addView(radio, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(2) })
+            }
+            container.addView(group)
+            return group
+        }
+
+        addGroup(getString(R.string.scan_area_portrait), portrait) {
+            prefs.scanAreaPortrait = it
+        }
+        addGroup(getString(R.string.scan_area_landscape), landscape) {
+            prefs.scanAreaLandscape = it
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.scan_area_title)
+            .setMessage(R.string.scan_area_hint)
+            .setView(scroll.also { it.addView(container) })
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("完成") { _, _ -> refreshScanAreaSummary() }
+            .show()
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     private fun setupInput() {
         binding.inputData.addTextChangedListener(object : TextWatcher {
@@ -197,6 +280,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnCopyAll.setOnClickListener { copyAll() }
         binding.btnMakeHd.setOnClickListener { withStoragePermission { makeHdImage() } }
         binding.btnZip.setOnClickListener { withStoragePermission { exportZip() } }
+        binding.btnScanArea.setOnClickListener { showScanAreaDialog() }
     }
 
     private fun setupDrawer() {
@@ -297,15 +381,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchScan() {
-        val options = ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.ALL_CODE_TYPES)
-            setPrompt(getString(R.string.scan_prompt))
-            setBeepEnabled(true)
-            setOrientationLocked(false)
-            setBarcodeImageEnabled(false)
-        }
         try {
-            scanLauncher.launch(options)
+            scanLauncher.launch(android.content.Intent(this, ScanActivity::class.java))
         } catch (t: Throwable) {
             toast("无法启动相机：${t.message}")
         }

@@ -51,7 +51,7 @@ echo "sdk.dir=/opt/android-sdk" > local.properties
 正式版（release）构建：
 
 ```bash
-# 需要 keystore/release.jks（已配置 signingConfig，密码 barcode2026）
+# Release 签名需要原始 keystore 和未提交的本地签名配置；请参阅 README。
 ./gradlew :app:assembleRelease
 
 # 产物

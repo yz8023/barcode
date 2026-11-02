@@ -5,8 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.graphics.RectF
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Bundle
@@ -23,17 +22,23 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.TorchState
+import androidx.camera.view.PreviewView
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.core.view.doOnLayout
 import com.barcode.factory.R
 import com.barcode.factory.data.AppPrefs
 import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityScanBinding
-import com.barcode.factory.util.TorchController
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -41,23 +46,21 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Full-screen barcode scanner backed by CameraX + ML Kit.
  *
- * The analyser crops a configurable central band (the same region the overlay
- * renders) before running ML Kit, so barcodes outside the recognition window
- * never reach the recogniser — preventing false reads when several codes are
- * on screen. The band fraction is stored per orientation (portrait / landscape).
+ * ML Kit reads camera frames directly. Detected bounding boxes are transformed
+ * to PreviewView coordinates and filtered against the visible scan window.
  */
 class ScanActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_RESULT = "scan_result"
         const val EXTRA_RESULT_FORMAT = "scan_result_format"
-        private const val TARGET_WIDTH = 960
-        private const val TARGET_HEIGHT = 540
-        private const val ML_KIT_MAX_WIDTH = 720
+        private const val TARGET_WIDTH = 1280
+        private const val TARGET_HEIGHT = 720
         private val TARGET_FORMATS = intArrayOf(
             Barcode.FORMAT_QR_CODE,
             Barcode.FORMAT_DATA_MATRIX,
@@ -79,20 +82,26 @@ class ScanActivity : AppCompatActivity() {
     private var isLandscape: Boolean = false
 
     private val scanning = AtomicBoolean(false)
+    private val finished = AtomicBoolean(false)
+    private val frameFailures = AtomicInteger(0)
     private var scanner: BarcodeScanner? = null
-    private var torchHandler: TorchController? = null
+    private var camera: Camera? = null
+    private var cameraProvider: ProcessCameraProvider? = null
     private var analysisExecutor: java.util.concurrent.ExecutorService? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startCamera() else toast(getString(R.string.permission_camera_denied))
+        if (granted) binding.previewView.doOnLayout { startCamera() }
+        else { toast(getString(R.string.permission_camera_denied)); finish() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityScanBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // CameraX requires COMPATIBLE mode for accurate OutputTransform mapping.
+        binding.previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         prefs = AppPrefs(this)
@@ -121,14 +130,16 @@ class ScanActivity : AppCompatActivity() {
     private fun requestCamera() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
-        if (granted) startCamera() else permissionLauncher.launch(Manifest.permission.CAMERA)
+        if (granted) binding.previewView.doOnLayout { startCamera() } else permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
     private fun startCamera() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
+                if (isFinishing || isDestroyed || finished.get()) return@addListener
                 val provider = future.get()
+                cameraProvider = provider
                 val preview = Preview.Builder()
                     .build()
                     .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
@@ -142,10 +153,18 @@ class ScanActivity : AppCompatActivity() {
                     } }
 
                 provider.unbindAll()
-                val camera = provider.bindToLifecycle(
-                    this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis
-                )
-                torchHandler = TorchController(camera)
+                val viewport = binding.previewView.viewPort ?: error("相机预览尚未就绪")
+                val group = UseCaseGroup.Builder().setViewPort(viewport)
+                    .addUseCase(preview).addUseCase(analysis).build()
+                val boundCamera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, group)
+                camera = boundCamera
+                binding.btnTorch.isEnabled = boundCamera.cameraInfo.hasFlashUnit()
+                binding.btnTorch.alpha = if (boundCamera.cameraInfo.hasFlashUnit()) 1f else 0.4f
+                boundCamera.cameraInfo.torchState.observe(this) { state ->
+                    torchOn = state == TorchState.ON
+                    binding.imgTorch.setImageResource(if (torchOn) R.drawable.ic_flash_off else R.drawable.ic_flash)
+                    binding.imgTorch.setColorFilter(if (torchOn) 0xFFFFC107.toInt() else android.graphics.Color.WHITE)
+                }
             } catch (t: Throwable) {
                 toast(getString(R.string.camera_bind_failed, t.message ?: ""))
                 finish()
@@ -153,68 +172,62 @@ class ScanActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    @androidx.camera.core.ExperimentalGetImage
     private fun analyzeFrame(image: ImageProxy) {
-        if (scanning.get()) {
-            image.close()
-            return
-        }
-        val rotation = image.imageInfo.rotationDegrees
-        val upright = runCatching { image.toBitmap() }
-            .getOrNull()
-            ?.let { rotateToUpright(it, rotation) }
-        if (upright == null) {
-            image.close()
-            return
-        }
-        val band = cropCenterBand(upright)
-        upright.recycle()
-        if (band == null) {
-            image.close()
-            return
-        }
-        val scaled = scaleForMlKit(band)
-        if (scaled !== band) band.recycle()
-        image.close()
-
-        if (!scanning.compareAndSet(false, true)) {
-            scaled.recycle()
-            return
-        }
-
-        val inputImage = InputImage.fromBitmap(scaled, 0)
-        scanner?.process(inputImage)
-            ?.addOnSuccessListener { barcodes ->
-                val raw = barcodes.firstOrNull()?.rawValue
-                val format = barcodes.firstOrNull()?.format ?: -1
-                if (!raw.isNullOrBlank()) finishWithResult(raw, format)
-            }
-            ?.addOnCompleteListener {
+        if (finished.get() || !scanning.compareAndSet(false, true)) { image.close(); return }
+        try {
+            val media = image.image ?: throw IllegalStateException("相机帧不可用")
+            val client = scanner ?: throw IllegalStateException("识别器不可用")
+            val source = ImageProxyTransformFactory().apply {
+                // ML Kit's coordinates are in the rotated full image, not crop-local coordinates.
+                isUsingCropRect = false
+                isUsingRotationDegrees = true
+            }.getOutputTransform(image)
+            val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
+            client.process(input).addOnSuccessListener { barcodes ->
+                if (finished.get() || isFinishing || isDestroyed) return@addOnSuccessListener
+                val target = binding.previewView.outputTransform ?: return@addOnSuccessListener
+                try {
+                    val transform = CoordinateTransform(source, target)
+                    val overlay = binding.overlayView
+                    val left = 28f * resources.displayMetrics.density
+                    val top = overlay.height * (1f - overlay.heightFraction) / 2f
+                    val window = RectF(left, top, overlay.width - left, overlay.height - top)
+                    val chosen = barcodes.mapNotNull { barcode ->
+                        val bounds = barcode.boundingBox ?: return@mapNotNull null
+                        if (barcode.rawValue.isNullOrBlank()) return@mapNotNull null
+                        val rect = RectF(bounds)
+                        transform.mapRect(rect)
+                        if (!window.contains(rect.centerX(), rect.centerY())) return@mapNotNull null
+                        val dx = rect.centerX() - window.centerX(); val dy = rect.centerY() - window.centerY()
+                        barcode to (dx * dx + dy * dy)
+                    }.minByOrNull { it.second }?.first
+                    if (frameFailures.getAndSet(0) >= 3) {
+                        binding.tvScanHint.setText(if (isLandscape) R.string.scan_hint_landscape else R.string.scan_hint_portrait)
+                    }
+                    if (chosen != null && finished.compareAndSet(false, true)) {
+                        try { cameraProvider?.unbindAll() } catch (_: Exception) { /* finish still returns the result */ }
+                        finishWithResult(chosen.rawValue!!, chosen.format)
+                    }
+                } catch (_: Exception) {
+                    // Preview transforms may not be ready during startup or rotation; retry the next frame.
+                    reportScanFailure()
+                }
+            }.addOnFailureListener { reportScanFailure() }.addOnCompleteListener {
+                image.close()
                 scanning.set(false)
-                scaled.recycle()
             }
+        } catch (_: Exception) {
+            image.close()
+            scanning.set(false)
+            reportScanFailure()
+        }
     }
 
-    private fun rotateToUpright(src: Bitmap, rotationDegrees: Int): Bitmap {
-        if (rotationDegrees == 0) return src
-        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-        val rotated = Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
-        if (rotated !== src) src.recycle()
-        return rotated
-    }
-
-    private fun cropCenterBand(src: Bitmap): Bitmap? {
-        val bandHeight = (src.height * areaFraction).toInt().coerceAtLeast(1)
-        if (bandHeight > src.height) return null
-        val top = (src.height - bandHeight) / 2
-        return runCatching {
-            Bitmap.createBitmap(src, 0, top, src.width, bandHeight)
-        }.getOrNull()
-    }
-
-    private fun scaleForMlKit(src: Bitmap): Bitmap {
-        if (src.width <= ML_KIT_MAX_WIDTH) return src
-        val ratio = ML_KIT_MAX_WIDTH.toFloat() / src.width
-        return Bitmap.createScaledBitmap(src, ML_KIT_MAX_WIDTH, (src.height * ratio).toInt(), true)
+    private fun reportScanFailure() {
+        if (frameFailures.incrementAndGet() == 3) runOnUiThread {
+            if (!isFinishing && !isDestroyed) binding.tvScanHint.text = "识别暂时失败，正在重试；也可退出后重新扫码"
+        }
     }
 
     private fun applyScanArea() {
@@ -265,7 +278,6 @@ class ScanActivity : AppCompatActivity() {
             prefs.scanAreaPortrait
         ) {
             prefs.scanAreaPortrait = it
-            isLandscape = false
             applyScanArea()
         }
         addGroup(
@@ -273,7 +285,6 @@ class ScanActivity : AppCompatActivity() {
             prefs.scanAreaLandscape
         ) {
             prefs.scanAreaLandscape = it
-            isLandscape = true
             applyScanArea()
         }
 
@@ -285,19 +296,19 @@ class ScanActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun toggleTorch() {
-        val handler = torchHandler ?: return
-        torchOn = !torchOn
-        binding.imgTorch.setImageResource(
-            if (torchOn) R.drawable.ic_flash_off else R.drawable.ic_flash
-        )
-        binding.imgTorch.setColorFilter(
-            if (torchOn) 0xFFFFC107.toInt() else android.graphics.Color.WHITE
-        )
-        handler.setTorch(torchOn)
-    }
-
     private var torchOn = false
+    private fun toggleTorch() {
+        val boundCamera = camera ?: return
+        if (!boundCamera.cameraInfo.hasFlashUnit()) { toast("当前相机没有闪光灯"); return }
+        binding.btnTorch.isEnabled = false
+        val future = boundCamera.cameraControl.enableTorch(!torchOn)
+        future.addListener({
+            if (!isDestroyed) {
+                binding.btnTorch.isEnabled = true
+                try { future.get() } catch (_: Exception) { toast("闪光灯切换失败") }
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
 
     private fun finishWithResult(raw: String, format: Int) {
         playBeep()
@@ -329,7 +340,8 @@ class ScanActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        torchHandler?.release()
+        finished.set(true)
+        cameraProvider?.unbindAll()
         scanner?.close()
         scanner = null
         analysisExecutor?.shutdown()

@@ -6,6 +6,10 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.text.InputType
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -20,6 +24,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -37,6 +42,8 @@ import com.barcode.factory.codec.BarcodeGenerator
 import com.barcode.factory.data.AppPrefs
 import com.barcode.factory.data.Archive
 import com.barcode.factory.data.ColorOption
+import com.barcode.factory.feature.ImageBarcodeReader
+import com.barcode.factory.feature.ImportGeometry
 import com.barcode.factory.databinding.ActivityMainBinding
 import com.barcode.factory.util.FileExporter
 import com.google.android.material.chip.Chip
@@ -44,6 +51,7 @@ import com.google.android.material.chip.ChipGroup
 import com.google.mlkit.vision.barcode.common.Barcode
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -60,6 +68,16 @@ class MainActivity : AppCompatActivity() {
     private var generateToken = 0
     private var pendingStorageAction: (() -> Unit)? = null
     private var progressDialog: AlertDialog? = null
+    private var scanLaunchPending = false
+    private var addDialog: AlertDialog? = null
+    private var addInput: EditText? = null
+    private var imageProgress: AlertDialog? = null
+    private var imageCancellation: AtomicBoolean? = null
+    private val imageExecutor = Executors.newSingleThreadExecutor()
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty()) readImages(uris)
+    }
 
     private val colorOptions = listOf(
         ColorOption("黑色", "#000000"),
@@ -72,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        scanLaunchPending = false
         if (result.resultCode == Activity.RESULT_OK) {
             val contents = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)
             if (contents.isNullOrBlank()) return@registerForActivityResult
@@ -84,7 +103,14 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) launchScan()
-        else toast("未授予相机权限，无法扫码")
+        else {
+            scanLaunchPending = false
+            AlertDialog.Builder(this).setTitle("需要相机权限")
+                .setMessage("扫码需要使用相机。如已拒绝权限，可在系统设置中开启。")
+                .setPositiveButton("去设置") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }.setNegativeButton("取消", null).show()
+        }
     }
 
     private val storagePermissionLauncher = registerForActivityResult(
@@ -117,6 +143,14 @@ class MainActivity : AppCompatActivity() {
         }
         scheduleGenerate(0)
         updateEmptyState()
+        if (savedInstanceState?.containsKey("add_dialog_text") == true) {
+            showManualAddDialog(savedInstanceState.getString("add_dialog_text").orEmpty())
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        if (addDialog?.isShowing == true) outState.putString("add_dialog_text", addInput?.text?.toString().orEmpty())
+        super.onSaveInstanceState(outState)
     }
 
     // ---------------------------------------------------------------- setup
@@ -342,6 +376,8 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------------- scan
 
     private fun startScan() {
+        if (scanLaunchPending) return
+        scanLaunchPending = true
         val granted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
@@ -353,47 +389,153 @@ class MainActivity : AppCompatActivity() {
         try {
             scanLauncher.launch(android.content.Intent(this, ScanActivity::class.java))
         } catch (t: Throwable) {
+            scanLaunchPending = false
             toast("无法启动相机：${t.message}")
         }
     }
 
     private fun appendScanned(value: String, mlKitFormat: Int = -1) {
-        val current = binding.inputData.text?.toString().orEmpty()
-        val merged = if (current.isBlank()) value else current.trimEnd('\n') + "\n" + value
-        binding.inputData.setText(merged)
-        binding.inputData.setSelection(merged.length)
-
-        matchFormatForScan(mlKitFormat)?.let { format ->
-            prefs.lastFormat = format.key
-            selectFormat(format)
+        val wasEmpty = currentValues().isEmpty()
+        appendValues(listOf(value))
+        val detected = matchFormatForScan(mlKitFormat)
+        // A scan must not change the meaning of every existing entry.
+        if (wasEmpty && detected != null) {
+            prefs.lastFormat = detected.key
+            selectFormat(detected)
             scheduleGenerate(0)
         }
-        toast(getString(R.string.scanned_added, value))
+        if (detected == null && mlKitFormat != -1)
+            toast("已记录；此码制不支持生成，可复制数据使用")
+        else if (!wasEmpty && detected != currentFormat)
+            toast("已记录；扫描格式与当前格式不同，请检查格式")
+        else toast(getString(R.string.scanned_added, value))
     }
 
     private fun matchFormatForScan(mlKitFormat: Int): BarcodeFormatSpec? = when (mlKitFormat) {
-        Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8 -> BarcodeFormatSpec.EAN13
+        Barcode.FORMAT_EAN_13 -> BarcodeFormatSpec.EAN13
         Barcode.FORMAT_CODE_128 -> BarcodeFormatSpec.CODE128
         Barcode.FORMAT_CODE_39 -> BarcodeFormatSpec.CODE39
-        Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E -> BarcodeFormatSpec.UPC
+        Barcode.FORMAT_UPC_A -> BarcodeFormatSpec.UPC
         Barcode.FORMAT_ITF -> BarcodeFormatSpec.ITF14
         else -> null
     }
 
-    private fun showManualAddDialog() {
-        val input = EditText(this).apply {
-            hint = "输入条码内容"
-            setPadding(48, 24, 48, 24)
+    private fun appendValues(values: List<String>) {
+        if (values.isEmpty()) return
+        val current = binding.inputData.text?.toString().orEmpty()
+        val incoming = values.joinToString("\n")
+        val merged = if (current.isBlank()) incoming else current.trimEnd('\n', '\r') + "\n" + incoming
+        binding.inputData.setText(merged)
+        binding.inputData.setSelection(merged.length)
+    }
+
+    private fun linesFrom(text: String): List<String> = ImportGeometry.lines(text)
+
+    private fun showManualAddDialog(initial: String = "") {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 12, 48, 0)
         }
-        AlertDialog.Builder(this)
+        val input = EditText(this).apply {
+            hint = "输入条码内容，每行一条"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3
+            maxLines = 8
+            setText(initial)
+            setSelection(text.length)
+        }
+        val clipboardButton = Button(this).apply { text = "从剪贴板读取" }
+        val imagesButton = Button(this).apply { text = "从图片识别（可多选）" }
+        container.addView(input, LinearLayout.LayoutParams(-1, -2))
+        container.addView(clipboardButton, LinearLayout.LayoutParams(-1, -2))
+        container.addView(imagesButton, LinearLayout.LayoutParams(-1, -2))
+        val dialog = AlertDialog.Builder(this)
             .setTitle("手动添加")
-            .setView(input)
+            .setView(container)
             .setPositiveButton("添加") { _, _ ->
-                val value = input.text.toString().trim()
-                if (value.isNotEmpty()) appendScanned(value)
+                val values = linesFrom(input.text.toString())
+                if (values.isNotEmpty()) { appendValues(values); toast("已添加 ${values.size} 条数据") }
             }
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+        addInput = input
+        addDialog = dialog
+        dialog.setOnDismissListener {
+            if (addDialog === dialog) { addDialog = null; addInput = null }
+        }
+        clipboardButton.setOnClickListener {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = clipboard.primaryClip
+            if (clip == null || clip.itemCount == 0) {
+                toast("剪贴板为空")
+            } else {
+                // Clipboard access happens on an explicit click; potentially slow URI conversion is off the UI thread.
+                imageExecutor.execute {
+                    val text = try { clip.getItemAt(0).coerceToText(applicationContext)?.toString().orEmpty() }
+                        catch (_: Exception) { "" }
+                    handler.post {
+                        if (isDestroyed || addDialog !== dialog) return@post
+                        if (text.isBlank()) toast("剪贴板中没有可读取的文本")
+                        else { addTextToDialog(input, text); toast("已读取剪贴板，请检查后点击添加") }
+                    }
+                }
+            }
+        }
+        imagesButton.setOnClickListener {
+            if (imageCancellation != null) { toast("请等待当前图片识别结束"); return@setOnClickListener }
+            try { imagePicker.launch("image/*") }
+            catch (e: Exception) { toast("无法打开图片选择器：${e.message}") }
+        }
+        dialog.show()
+    }
+
+    private fun addTextToDialog(input: EditText, text: String) {
+        val old = input.text.toString()
+        val merged = if (old.isBlank()) text else old.trimEnd('\n', '\r') + "\n" + text
+        input.setText(merged)
+        input.setSelection(merged.length)
+    }
+
+    private fun readImages(uris: List<Uri>) {
+        val cancelled = AtomicBoolean(false)
+        imageCancellation = cancelled
+        val message = TextView(this).apply { setPadding(48, 32, 48, 16); text = "正在识别图片…" }
+        val dialog = AlertDialog.Builder(this).setTitle("图片转数据")
+            .setView(message).setCancelable(false)
+            .setNegativeButton("停止") { _, _ -> cancelled.set(true) }.create()
+        imageProgress = dialog
+        dialog.show()
+        imageExecutor.execute {
+            val result = try {
+                ImageBarcodeReader.read(applicationContext, uris, cancelled) { done, total ->
+                    handler.post { if (!isDestroyed && imageProgress === dialog) message.text = "正在识别第 $done / $total 张图片…" }
+                }
+            } catch (e: Exception) {
+                ImageBarcodeReader.Outcome(emptyList(), listOf(e.message ?: "识别失败"), 0, cancelled.get())
+            } catch (_: OutOfMemoryError) {
+                ImageBarcodeReader.Outcome(emptyList(), listOf("内存不足，请分批选择图片"), 0, cancelled.get())
+            }
+            handler.post {
+                if (isFinishing || isDestroyed) return@post
+                dialog.dismiss()
+                if (imageProgress === dialog) imageProgress = null
+                if (imageCancellation === cancelled) imageCancellation = null
+                if (result.values.isNotEmpty()) {
+                    val input = addInput
+                    if (input != null && addDialog?.isShowing == true) addTextToDialog(input, result.values.joinToString("\n"))
+                    else showManualAddDialog(result.values.joinToString("\n"))
+                }
+                val details = mutableListOf("识别到 ${result.values.size} 条数据。")
+                if (result.emptyImages > 0) details.add("${result.emptyImages} 张图片未识别到条码。")
+                if (result.failures.isNotEmpty()) details.add("${result.failures.size} 张图片读取失败：\n" + result.failures.take(5).joinToString("\n"))
+                if (result.cancelled) details.add("识别已停止，已完成的结果保留。")
+                if (result.values.isNotEmpty()) details.add("结果已放入输入框，请检查后点击添加。不同格式的数据可能需要切换当前格式。")
+                if (result.values.any { '\n' in it || '\r' in it })
+                    details.add("部分识别内容含换行，添加时会按行拆分；若需原文请先在输入框复制。")
+                AlertDialog.Builder(this).setTitle("图片识别结果").setMessage(details.joinToString("\n"))
+                    .setPositiveButton("确定", null).show()
+            }
+        }
     }
 
     // -------------------------------------------------------------- copy
@@ -670,6 +812,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        imageCancellation?.set(true)
+        imageProgress?.dismiss()
+        addDialog?.dismiss()
+        imageExecutor.shutdownNow()
         handler.removeCallbacksAndMessages(null)
         executor.shutdownNow()
     }

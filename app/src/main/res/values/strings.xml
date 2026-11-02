@@ -6,7 +6,7 @@
     <string name="archive_records">存档记录</string>
     <string name="archive_current">存档当前</string>
     <string name="input_hint">在此输入数据，每行一个，或点击扫码自动记录…</string>
-    <string name="input_tip">点击预览条码可复制，长按保存单张；扫码自动追加记录并匹配格式</string>
+    <string name="input_tip">点击预览条码可复制，长按保存单张；扫码自动追加，空列表时匹配格式</string>
     <string name="render_config">渲染配置</string>
     <string name="format_label">格式</string>
     <string name="columns_label">拼图列数</string>
@@ -37,7 +37,7 @@
     <string name="scan_area_portrait">竖屏</string>
     <string name="scan_area_landscape">横屏</string>
     <string name="input_card_title">数据输入</string>
-    <string name="scan_area_hint">提示：周围暗角外的条码不会参与识别，避免多码误读</string>
+    <string name="scan_area_hint">提示：仅选择中心位于框内的条码，避免多码误读</string>
     <string name="scan_hint_portrait">将条码置于框内・自动识别</string>
     <string name="scan_hint_landscape">横屏：将条码置于框内・自动识别</string>
     <string name="scan_close">关闭扫描</string>

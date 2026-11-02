@@ -62,6 +62,17 @@ internal object ImportGeometry {
         }
         return out
     }
+    /** Preserve first occurrence and original blank lines; comparison matches input trimming. */
+    fun deduplicateText(text: String): Pair<String, Int> {
+        val originalLines = text.split(Regex("\\r\\n|\\n|\\r"))
+        val seen = mutableSetOf<String>()
+        var removed = 0
+        val kept = originalLines.filter { line ->
+            val value = line.trim()
+            if (value.isEmpty() || seen.add(value)) true else { removed++; false }
+        }
+        return if (removed == 0) text to 0 else kept.joinToString("\n") to removed
+    }
     fun lines(text: String): List<String> = text.split(Regex("\\r\\n|\\n|\\r"))
         .map { it.trim() }.filter { it.isNotEmpty() }
 }

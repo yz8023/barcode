@@ -35,4 +35,13 @@ class ImportGeometryTest {
     @Test fun textLinesHandleCommonLineEndingsAndKeepRepeatedValues() {
         assertEquals(listOf("a", "b", "a", "c"), ImportGeometry.lines(" a\r\nb\ra\n \n c "))
     }
+    @Test fun deduplicationKeepsFirstAndIsCaseSensitive() {
+        val (text, count) = ImportGeometry.deduplicateText("  A  \nB\nA\na\nB\n\n")
+        assertEquals(2, count)
+        assertEquals("  A  \nB\na\n\n", text)
+    }
+    @Test fun deduplicationWithoutDuplicatesDoesNotRewriteText() {
+        val input = "A\r\n B \r\n"
+        assertEquals(input to 0, ImportGeometry.deduplicateText(input))
+    }
 }

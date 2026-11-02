@@ -110,13 +110,29 @@
                         android:orientation="vertical"
                         android:padding="16dp">
 
-                        <TextView
-                            android:layout_width="wrap_content"
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/input_card_title"
-                            android:textColor="@color/primary"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/input_card_title"
+                                android:textColor="@color/primary"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+                            <Button
+                                android:id="@+id/btnDedupe"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="48dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:text="@string/dedupe"
+                                android:textSize="13sp" />
+                        </LinearLayout>
 
                         <EditText
                             android:id="@+id/inputData"
@@ -171,9 +187,8 @@
                                 android:layout_weight="1"
                                 android:insetTop="0dp"
                                 android:insetBottom="0dp"
-                                android:text="手动添加"
+                                android:text="@string/read_clipboard"
                                 android:textSize="14sp"
-                                app:icon="@drawable/ic_add"
                                 app:iconGravity="textStart"
                                 app:iconTint="@color/primary" />
                         </LinearLayout>

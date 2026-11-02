@@ -95,11 +95,23 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="72dp"
+        android:layout_marginBottom="86dp"
         android:background="@drawable/bg_badge"
         android:paddingHorizontal="20dp"
         android:paddingVertical="10dp"
         android:text="@string/scan_hint_portrait"
         android:textColor="@android:color/white"
         android:textSize="14sp" />
+    <Button
+        android:id="@+id/btnScanImportImages"
+        style="?attr/materialButtonOutlinedStyle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="18dp"
+        android:text="@string/scan_import_images"
+        android:textColor="@android:color/white"
+        app:icon="@drawable/ic_image"
+        app:iconTint="@android:color/white"
+        app:strokeColor="@android:color/white" />
 </FrameLayout>

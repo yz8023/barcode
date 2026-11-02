@@ -29,10 +29,21 @@ android {
         minSdk = 24
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 5
-        versionName = "1.4"
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        versionCode = 6
+        versionName = "1.5"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // The app itself is Chinese; retain English for library fallback.
+        resourceConfigurations += listOf("zh", "en")
+    }
+
+    // Separate CPU-specific APKs avoid shipping two copies of ML Kit native libraries.
+    // Keep a universal APK for devices whose architecture is unknown.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
         }
     }
 

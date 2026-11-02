@@ -37,6 +37,9 @@
     <string name="scan_area_portrait">竖屏</string>
     <string name="scan_area_landscape">横屏</string>
     <string name="input_card_title">数据输入</string>
+    <string name="dedupe">一键去重</string>
+    <string name="read_clipboard">读取剪贴板</string>
+    <string name="scan_import_images">从图片识别（可多选）</string>
     <string name="scan_area_hint">提示：仅选择中心位于框内的条码，避免多码误读</string>
     <string name="scan_hint_portrait">将条码置于框内・自动识别</string>
     <string name="scan_hint_landscape">横屏：将条码置于框内・自动识别</string>

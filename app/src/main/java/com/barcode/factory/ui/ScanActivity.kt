@@ -3,6 +3,8 @@ package com.barcode.factory.ui
 import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.RectF
@@ -39,6 +41,7 @@ import com.barcode.factory.R
 import com.barcode.factory.data.AppPrefs
 import com.barcode.factory.data.ScanAreaOption
 import com.barcode.factory.databinding.ActivityScanBinding
+import com.barcode.factory.feature.ImageBarcodeReader
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -59,6 +62,7 @@ class ScanActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RESULT = "scan_result"
         const val EXTRA_RESULT_FORMAT = "scan_result_format"
+        const val EXTRA_RESULT_LIST = "scan_result_list"
         private const val TARGET_WIDTH = 1280
         private const val TARGET_HEIGHT = 720
         private val TARGET_FORMATS = intArrayOf(
@@ -84,6 +88,12 @@ class ScanActivity : AppCompatActivity() {
     private val scanning = AtomicBoolean(false)
     private val finished = AtomicBoolean(false)
     private val frameFailures = AtomicInteger(0)
+    private val importingImages = AtomicBoolean(false)
+    private val imageExecutor = Executors.newSingleThreadExecutor()
+    private var imageCancellation: AtomicBoolean? = null
+    private var imageProgress: AlertDialog? = null
+    private var cameraStarting = false
+    private var imagePickerPending = false
     private var scanner: BarcodeScanner? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -93,12 +103,20 @@ class ScanActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) binding.previewView.doOnLayout { startCamera() }
-        else { toast(getString(R.string.permission_camera_denied)); finish() }
+        else showNoCameraHint()
+    }
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        imagePickerPending = false
+        if (uris.isEmpty()) importingImages.set(false)
+        else { importingImages.set(true); readImages(uris) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityScanBinding.inflate(layoutInflater)
+        imagePickerPending = savedInstanceState?.getBoolean("image_picker_pending") ?: false
+        importingImages.set(imagePickerPending)
         setContentView(binding.root)
         // CameraX requires COMPATIBLE mode for accurate OutputTransform mapping.
         binding.previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -116,6 +134,16 @@ class ScanActivity : AppCompatActivity() {
         binding.btnCloseScan.setOnClickListener { finish() }
         binding.btnTorch.setOnClickListener { toggleTorch() }
         binding.btnAreaConfig.setOnClickListener { showAreaConfigDialog() }
+        binding.btnScanImportImages.setOnClickListener { pickImages() }
+        binding.tvScanHint.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                AlertDialog.Builder(this).setTitle("需要相机权限")
+                    .setMessage("请在系统设置中开启相机权限；也可以继续从图片识别。")
+                    .setPositiveButton("去设置") { _, _ ->
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                    }.setNegativeButton("取消", null).show()
+            }
+        }
 
         scanner = BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -127,13 +155,32 @@ class ScanActivity : AppCompatActivity() {
         requestCamera()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("image_picker_pending", imagePickerPending)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun requestCamera() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) binding.previewView.doOnLayout { startCamera() } else permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (scanner != null && camera == null &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            binding.previewView.doOnLayout { startCamera() }
+        }
+    }
+
+    private fun showNoCameraHint() {
+        binding.tvScanHint.text = "未开启相机权限，点此设置；仍可从图片识别"
+    }
+
     private fun startCamera() {
+        if (cameraStarting || camera != null || isFinishing || isDestroyed) return
+        cameraStarting = true
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
@@ -167,14 +214,16 @@ class ScanActivity : AppCompatActivity() {
                 }
             } catch (t: Throwable) {
                 toast(getString(R.string.camera_bind_failed, t.message ?: ""))
-                finish()
+                binding.tvScanHint.text = "相机启动失败，仍可从图片识别"
+            } finally {
+                cameraStarting = false
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
     @androidx.camera.core.ExperimentalGetImage
     private fun analyzeFrame(image: ImageProxy) {
-        if (finished.get() || !scanning.compareAndSet(false, true)) { image.close(); return }
+        if (finished.get() || importingImages.get() || !scanning.compareAndSet(false, true)) { image.close(); return }
         try {
             val media = image.image ?: throw IllegalStateException("相机帧不可用")
             val client = scanner ?: throw IllegalStateException("识别器不可用")
@@ -185,7 +234,7 @@ class ScanActivity : AppCompatActivity() {
             }.getOutputTransform(image)
             val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
             client.process(input).addOnSuccessListener { barcodes ->
-                if (finished.get() || isFinishing || isDestroyed) return@addOnSuccessListener
+                if (finished.get() || importingImages.get() || isFinishing || isDestroyed) return@addOnSuccessListener
                 val target = binding.previewView.outputTransform ?: return@addOnSuccessListener
                 try {
                     val transform = CoordinateTransform(source, target)
@@ -227,6 +276,75 @@ class ScanActivity : AppCompatActivity() {
     private fun reportScanFailure() {
         if (frameFailures.incrementAndGet() == 3) runOnUiThread {
             if (!isFinishing && !isDestroyed) binding.tvScanHint.text = "识别暂时失败，正在重试；也可退出后重新扫码"
+        }
+    }
+
+    private fun pickImages() {
+        if (finished.get() || !importingImages.compareAndSet(false, true)) return
+        try { imagePickerPending = true; imagePicker.launch("image/*") }
+        catch (e: Exception) {
+            imagePickerPending = false
+            importingImages.set(false)
+            toast("无法打开图片选择器：${e.message}")
+        }
+    }
+
+    private fun readImages(uris: List<Uri>) {
+        val cancelled = AtomicBoolean(false)
+        imageCancellation = cancelled
+        val message = TextView(this).apply { setPadding(dp(24), dp(16), dp(24), dp(8)); text = "正在识别图片…" }
+        val progress = AlertDialog.Builder(this).setTitle("图片转数据")
+            .setView(message).setCancelable(false)
+            .setNegativeButton("停止") { _, _ -> cancelled.set(true) }.create()
+        imageProgress = progress
+        progress.show()
+        imageExecutor.execute {
+            val result = try {
+                ImageBarcodeReader.read(applicationContext, uris, cancelled) { done, total ->
+                    runOnUiThread { if (!isDestroyed && imageProgress === progress) message.text = "正在识别第 $done / $total 张图片…" }
+                }
+            } catch (e: Exception) {
+                ImageBarcodeReader.Outcome(emptyList(), listOf(e.message ?: "识别失败"), 0, cancelled.get())
+            } catch (_: OutOfMemoryError) {
+                ImageBarcodeReader.Outcome(emptyList(), listOf("内存不足，请分批选择图片"), 0, cancelled.get())
+            }
+            runOnUiThread {
+                if (isDestroyed || isFinishing) return@runOnUiThread
+                progress.dismiss()
+                if (imageProgress === progress) imageProgress = null
+                imageCancellation = null
+                showImageResults(result)
+            }
+        }
+    }
+
+    private fun showImageResults(result: ImageBarcodeReader.Outcome) {
+        val values = result.values
+        val details = mutableListOf("识别到 ${values.size} 条数据。")
+        if (result.emptyImages > 0) details.add("${result.emptyImages} 张图片未识别到条码。")
+        if (result.failures.isNotEmpty()) details.add("${result.failures.size} 张图片读取失败：\n" + result.failures.take(5).joinToString("\n"))
+        if (result.cancelled) details.add("已停止，保留已完成图片的结果。")
+        if (values.isNotEmpty()) {
+            details.add("预览：\n" + values.take(8).joinToString("\n") { it.take(100) } + if (values.size > 8) "\n…" else "")
+            details.add("添加后使用首页当前条码格式。")
+            if (values.any { '\n' in it || '\r' in it }) details.add("包含换行的内容添加后会按行拆分。")
+        }
+        // Intent transaction size is bounded; fail explicitly rather than silently dropping values.
+        val estimatedSize = values.sumOf { it.length.toLong() * 4 + 32 }
+        val fits = estimatedSize <= 600_000
+        if (!fits) details.add("结果过大，请分批选择图片后重试。")
+        val builder = AlertDialog.Builder(this).setTitle("图片识别结果").setMessage(details.joinToString("\n"))
+            .setNegativeButton("继续扫码", null)
+        if (values.isNotEmpty() && fits) builder.setPositiveButton("添加 ${values.size} 条") { _, _ ->
+            if (finished.compareAndSet(false, true)) {
+                try { cameraProvider?.unbindAll() } catch (_: Exception) { }
+                setResult(RESULT_OK, Intent().putStringArrayListExtra(EXTRA_RESULT_LIST, ArrayList(values)))
+                finish()
+            }
+        }
+        builder.create().apply {
+            setOnDismissListener { if (!finished.get()) importingImages.set(false) }
+            show()
         }
     }
 
@@ -341,6 +459,9 @@ class ScanActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         finished.set(true)
+        imageCancellation?.set(true)
+        imageProgress?.dismiss()
+        imageExecutor.shutdownNow()
         cameraProvider?.unbindAll()
         scanner?.close()
         scanner = null
